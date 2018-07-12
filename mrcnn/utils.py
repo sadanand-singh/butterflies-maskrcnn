@@ -352,7 +352,7 @@ class Utils:
                         (gt_h, gt_w),
                         order=1,
                         mode="constant",
-                        anti_aliasing=True,
+                        anti_aliasing=False,
                     )
                 ).astype(bool)
                 # Place the mini batch in the placeholder
@@ -364,7 +364,7 @@ class Utils:
             mask = skimage.transform.resize(
                 m,
                 config.MASK_SHAPE,
-                anti_aliasing=True,
+                anti_aliasing=False,
                 order=1,
                 mode="constant",
             )
@@ -858,7 +858,7 @@ class Utils:
                 image,
                 (round(h * scale), round(w * scale)),
                 order=1,
-                anti_aliasing=True,
+                anti_aliasing=False,
                 mode="constant",
                 preserve_range=True,
             )
@@ -949,7 +949,7 @@ class Utils:
                 raise Exception("Invalid bounding box with area of zero")
             # Resize with bilinear interpolation
             m = skimage.transform.resize(
-                m, mini_shape, order=1, anti_aliasing=True, mode="constant"
+                m, mini_shape, order=1, anti_aliasing=False, mode="constant"
             )
             mini_mask[:, :, i] = np.around(m).astype(np.bool)
         return mini_mask
@@ -969,7 +969,7 @@ class Utils:
             w = x2 - x1
             # Resize with bilinear interpolation
             m = skimage.transform.resize(
-                m, (h, w), order=1, anti_aliasing=True, mode="constant"
+                m, (h, w), order=1, anti_aliasing=False, mode="constant"
             )
             mask[y1:y2, x1:x2, i] = np.around(m).astype(np.bool)
         return mask
@@ -994,7 +994,7 @@ class Utils:
             mask,
             (y2 - y1, x2 - x1),
             order=1,
-            anti_aliasing=True,
+            anti_aliasing=False,
             mode="constant",
         )
         mask = np.where(mask >= threshold, 1, 0).astype(np.bool)
