@@ -7,6 +7,7 @@ from mrcnn.dataloader import ButterflyDataset
 from mrcnn.config import ButterflyConfig
 from mrcnn.model import MaskRCNN
 from mrcnn.utils import Utils
+from imgaug import augmenters as iaa
 
 
 def color_splash(image, mask):
@@ -99,6 +100,58 @@ def train(model, path, config):
     dataset_test.load_data(path, "val")
     dataset_test.prepare()
 
+    # image argumentations
+    def sometimes(aug):
+        return iaa.Sometimes(0.5, aug)
+
+    augs = iaa.Sequential(
+        [
+            iaa.Fliplr(0.5),  # horizontally flip 50% of all images
+            iaa.Flipud(0.5),  # vertically flip 20% of all images
+            # crop images by -5% to 10% of their height/width
+            sometimes(iaa.CropAndPad(percent=(-0.05, 0.05))),
+            sometimes(
+                iaa.Affine(
+                    scale={"x": (0.8, 1.2), "y": (0.8, 1.2)},
+                    translate_percent={
+                        "x": (-0.2, 0.2),
+                        "y": (-0.2, 0.2),
+                    },  # translate by -20 to +20 percent (per axis)
+                    rotate=(-15, 15),  # rotate by -45 to +45 degrees
+                    shear=(-10, 10),  # shear by -16 to +16 degrees
+                )
+            ),
+            iaa.SomeOf(
+                (0, 4),
+                [
+                    iaa.OneOf(
+                        [
+                            iaa.GaussianBlur((0, 3.0)),
+                            iaa.AverageBlur(k=(2, 7)),
+                            iaa.MedianBlur(k=(3, 11)),
+                        ]
+                    ),
+                    iaa.Sharpen(
+                        alpha=(0, 1.0), lightness=(0.75, 1.5)
+                    ),  # sharpen images
+                    iaa.AdditiveGaussianNoise(
+                        loc=0, scale=(0.0, 0.05 * 255), per_channel=0.5
+                    ),  # add gaussian noise to images
+                    iaa.Invert(0.05, per_channel=True),
+                    iaa.Add((-10, 10), per_channel=0.5),
+                    iaa.AddToHueAndSaturation(
+                        (-20, 20)
+                    ),  # change hue and saturation
+                    iaa.ContrastNormalization(
+                        (0.5, 2.0), per_channel=0.5
+                    ),  # improve or worsen the contrast
+                ],
+                random_order=True,
+            ),
+        ],
+        random_order=True,
+    )
+
     # *** This training schedule is an example. Update to your needs ***
     # Since we're using a very small dataset, and starting from
     # COCO trained weights, we don't need to train too long. Also,
@@ -110,6 +163,7 @@ def train(model, path, config):
         learning_rate=config.LEARNING_RATE,
         epochs=30,
         layers="heads",
+        augmentation=augs,
     )
 
 
