@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 import numpy as np
+import pydicom
+import cv2
 import skimage
 import os
 import logging
@@ -34,9 +36,7 @@ class Dataset(ABC):
                 # source.class_id combination already available, skip
                 return
         # Add the class
-        self.class_info.append(
-            {"source": source, "id": class_id, "name": class_name}
-        )
+        self.class_info.append({"source": source, "id": class_id, "name": class_name})
 
     def add_image(self, source, image_id, path, **kwargs):
         image_info = {"id": image_id, "source": source, "path": path}
@@ -125,7 +125,10 @@ class Dataset(ABC):
         """Load the specified image and return a [H,W,3] Numpy array.
         """
         # Load image
-        image = skimage.io.imread(self.image_info[image_id]["path"])
+        image = pydicom.read_file(self.image_info[image_id]["path"]).pixel_array
+        image = cv2.normalize(
+            image, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F
+        )
         # If grayscale. Convert to RGB for consistency.
         if image.ndim != 3:
             image = skimage.color.gray2rgb(image)
@@ -165,14 +168,14 @@ class Dataset(ABC):
         return ""
 
 
-class ButterflyDataset(Dataset):
+class RSNADataset(Dataset):
     def load_data(self, dataset_dir, subset):
         """Load a subset of the Butterfly dataset.
         dataset_dir: Root directory of the dataset.
         subset: Subset to load: train or val
         """
         # Add classes. We have only one class to add.
-        self.add_class("butterfly", 1, "butterfly")
+        self.add_class("pneumonia", 1, "pneumonia")
 
         # Train or validation dataset?
         assert subset in ["train", "val"]
@@ -193,9 +196,7 @@ class ButterflyDataset(Dataset):
         #   'size': 100202
         # }
         # We mostly care about the x and y coordinates of each region
-        annotations = json.load(
-            open(os.path.join(dataset_dir, "via_region_data.json"))
-        )
+        annotations = json.load(open(os.path.join(dataset_dir, "via_region_data.json")))
         annotations = list(annotations.values())  # don't need the dict keys
 
         # The VIA tool saves images in the JSON even if they don't have any
@@ -224,34 +225,6 @@ class ButterflyDataset(Dataset):
                 height=height,
                 polygons=polygons,
             )
-
-    def load_mask(self, image_id):
-        """Generate instance masks for an image.
-       Returns:
-        masks: A bool array of shape [height, width, instance count] with
-            one mask per instance.
-        class_ids: a 1D array of class IDs of the instance masks.
-        """
-        # If not a butterfly dataset image, delegate to parent class.
-        image_info = self.image_info[image_id]
-        if image_info["source"] != "butterfly":
-            return super(self.__class__, self).load_mask(image_id)
-
-        # Convert polygons to a bitmap mask of shape
-        # [height, width, instance_count]
-        info = self.image_info[image_id]
-        mask = np.zeros(
-            [info["height"], info["width"], len(info["polygons"])],
-            dtype=np.uint8,
-        )
-        for i, p in enumerate(info["polygons"]):
-            # Get indexes of pixels inside the polygon and set them to 1
-            rr, cc = skimage.draw.polygon(p["all_points_y"], p["all_points_x"])
-            mask[rr, cc, i] = 1
-
-        # Return mask, and array of class IDs of each instance. Since we have
-        # one class ID only, we return an array of 1s
-        return mask.astype(np.bool), np.ones([mask.shape[-1]], dtype=np.int32)
 
     def image_reference(self, image_id):
         """Return the path of the image."""
@@ -373,9 +346,7 @@ def data_generator(
                     [batch_size, config.RPN_TRAIN_ANCHORS_PER_IMAGE, 4],
                     dtype=rpn_bbox.dtype,
                 )
-                batch_images = np.zeros(
-                    (batch_size,) + image.shape, dtype=np.float32
-                )
+                batch_images = np.zeros((batch_size,) + image.shape, dtype=np.float32)
                 batch_gt_class_ids = np.zeros(
                     (batch_size, config.MAX_GT_INSTANCES), dtype=np.int32
                 )
@@ -393,8 +364,7 @@ def data_generator(
                 )
                 if random_rois:
                     batch_rpn_rois = np.zeros(
-                        (batch_size, rpn_rois.shape[0], 4),
-                        dtype=rpn_rois.dtype,
+                        (batch_size, rpn_rois.shape[0], 4), dtype=rpn_rois.dtype
                     )
                     if detection_targets:
                         batch_rois = np.zeros(
@@ -405,20 +375,16 @@ def data_generator(
                             dtype=mrcnn_class_ids.dtype,
                         )
                         batch_mrcnn_bbox = np.zeros(
-                            (batch_size,) + mrcnn_bbox.shape,
-                            dtype=mrcnn_bbox.dtype,
+                            (batch_size,) + mrcnn_bbox.shape, dtype=mrcnn_bbox.dtype
                         )
                         batch_mrcnn_mask = np.zeros(
-                            (batch_size,) + mrcnn_mask.shape,
-                            dtype=mrcnn_mask.dtype,
+                            (batch_size,) + mrcnn_mask.shape, dtype=mrcnn_mask.dtype
                         )
 
             # If more instances than fits in the array, sub-sample from them.
             if gt_boxes.shape[0] > config.MAX_GT_INSTANCES:
                 ids = np.random.choice(
-                    np.arange(gt_boxes.shape[0]),
-                    config.MAX_GT_INSTANCES,
-                    replace=False,
+                    np.arange(gt_boxes.shape[0]), config.MAX_GT_INSTANCES, replace=False
                 )
                 gt_class_ids = gt_class_ids[ids]
                 gt_boxes = gt_boxes[ids]
@@ -428,9 +394,7 @@ def data_generator(
             batch_image_meta[b] = image_meta
             batch_rpn_match[b] = rpn_match[:, np.newaxis]
             batch_rpn_bbox[b] = rpn_bbox
-            batch_images[b] = Utils.mold_image(
-                image.astype(np.float32), config
-            )
+            batch_images[b] = Utils.mold_image(image.astype(np.float32), config)
             batch_gt_class_ids[b, : gt_class_ids.shape[0]] = gt_class_ids
             batch_gt_boxes[b, : gt_boxes.shape[0]] = gt_boxes
             batch_gt_masks[b, :, :, : gt_masks.shape[-1]] = gt_masks
@@ -466,11 +430,7 @@ def data_generator(
                             batch_mrcnn_class_ids, -1
                         )
                         outputs.extend(
-                            [
-                                batch_mrcnn_class_ids,
-                                batch_mrcnn_bbox,
-                                batch_mrcnn_mask,
-                            ]
+                            [batch_mrcnn_class_ids, batch_mrcnn_bbox, batch_mrcnn_mask]
                         )
 
                 yield inputs, outputs
@@ -482,9 +442,7 @@ def data_generator(
         except:
             # Log it and skip the image
             logging.exception(
-                "Error processing image {}".format(
-                    dataset.image_info[image_id]
-                )
+                "Error processing image {}".format(dataset.image_info[image_id])
             )
             error_count += 1
             if error_count > 5:
